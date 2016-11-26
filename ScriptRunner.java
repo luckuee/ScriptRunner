@@ -1,34 +1,19 @@
-/*
- * Slightly modified version of the com.ibatis.common.jdbc.ScriptRunner class
- * from the iBATIS Apache project. Only removed dependency on Resource class
- * and a constructor 
- * GPSHansl, 06.08.2015: regex for delimiter, rearrange comment/delimiter detection, remove some ide warnings.
- */
-/*
- *  Copyright 2004 Clinton Begin
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+//https://github.com/BenoitDuffez/ScriptRunner/blob/master/ScriptRunner.java
+//https://www.mkyong.com/jdbc/how-to-run-a-mysql-script-using-java/
+//http://www.codeproject.com/Articles/802383/Run-SQL-Script-sql-containing-DDL-DML-SELECT-state
+/**
+ * Created by rbhushan on 11/4/2016.
  */
 
-import java.io.IOException;
-import java.io.LineNumberReader;
-import java.io.PrintWriter;
-import java.io.Reader;
+import com.ingenix.freya.DBUtil;
+
+import java.io.*;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,6 +21,61 @@ import java.util.regex.Pattern;
  * Tool to run database scripts
  */
 public class ScriptRunner {
+
+
+    public static void main(String[] args) throws Exception {
+        Connection connection = DBUtil.getStandAloneConnection();
+
+
+        if (!DBUtil.mDbInfo.getDbType().equalsIgnoreCase("oracle")) {
+            DBUtil.fullLineDelimiter = "GO";
+            File folder = new File(DBUtil.getCurrentProductionDirectory());
+            File[] listOfFiles = folder.listFiles();
+            for (int i = 0; i < listOfFiles.length; i++) {
+                if (listOfFiles[i].isFile()) {//_sysadmin
+                    if (listOfFiles[i].getName().endsWith(".sql") && listOfFiles[i].getName().contains("SQLServer") && listOfFiles[i].getName().contains("sysadmin"))
+                        DBUtil.adminScriptFile = listOfFiles[i].getName();
+                    if (listOfFiles[i].getName().endsWith(".sql") && listOfFiles[i].getName().contains("SQLServer") && !listOfFiles[i].getName().contains("sysadmin"))
+                        DBUtil.productScriptFile = listOfFiles[i].getName();
+                }
+            }
+        } else {
+            DBUtil.fullLineDelimiter = "/";
+            File folder = new File(DBUtil.getCurrentProductionDirectory());
+            File[] listOfFiles = folder.listFiles();
+            for (int i = 0; i < listOfFiles.length; i++) {
+                if (listOfFiles[i].isFile()) {//_sysadmin
+                    if (listOfFiles[i].getName().endsWith(".sql") && listOfFiles[i].getName().contains("Oracle") && listOfFiles[i].getName().contains("DBA"))
+                        DBUtil.adminScriptFile = listOfFiles[i].getName();
+                    if (listOfFiles[i].getName().endsWith(".sql") && listOfFiles[i].getName().contains("Oracle") && !listOfFiles[i].getName().contains("DBA"))
+                        DBUtil.productScriptFile = listOfFiles[i].getName();
+                }
+            }
+        }
+
+        System.out.println("product script file name is: " + DBUtil.productScriptFile);
+        System.out.println("admin script file name is: " + DBUtil.adminScriptFile);
+
+        System.out.println("Database connected with product user credential.");
+        ScriptRunner runner = new ScriptRunner(connection, false, true);
+        String absoluteFilePath = DBUtil.getCurrentProductionDirectory() + File.separator + DBUtil.productScriptFile;
+        if (DBUtil.fullLineDelimiter != null) {
+            runner.setDelimiter(DBUtil.fullLineDelimiter, true);
+        }
+        runner.runScript(new BufferedReader(new FileReader(absoluteFilePath)));
+        connection.close();
+
+        connection = DBUtil.getStandAloneAdminConnection();
+        System.out.println("Database connected with admin user credential.");
+        runner = new ScriptRunner(connection, false, true);
+        absoluteFilePath = DBUtil.getCurrentProductionDirectory() + File.separator + DBUtil.adminScriptFile;
+        if (DBUtil.fullLineDelimiter != null) {
+            runner.setDelimiter(DBUtil.fullLineDelimiter, true);
+        }
+        runner.runScript(new BufferedReader(new FileReader(absoluteFilePath)));
+        connection.close();
+
+    }
 
     private static final String DEFAULT_DELIMITER = ";";
     /**
@@ -61,7 +101,7 @@ public class ScriptRunner {
      * Default constructor
      */
     public ScriptRunner(Connection connection, boolean autoCommit,
-            boolean stopOnError) {
+                        boolean stopOnError) {
         this.connection = connection;
         this.autoCommit = autoCommit;
         this.stopOnError = stopOnError;
@@ -117,10 +157,10 @@ public class ScriptRunner {
      * Runs an SQL script (read in using the Reader parameter) using the
      * connection passed in
      *
-     * @param conn - the connection to use for the script
+     * @param conn   - the connection to use for the script
      * @param reader - the source of the script
      * @throws SQLException if any SQL errors occur
-     * @throws IOException if there is an error reading from the Reader
+     * @throws IOException  if there is an error reading from the Reader
      */
     private void runScript(Connection conn, Reader reader) throws IOException,
             SQLException {
@@ -158,8 +198,8 @@ public class ScriptRunner {
                     command.append("\n");
                 }
             }
-            if (command != null) {
-            	this.execCommand(conn, command, lineReader);
+            if (command != null && command.length() > 0) {
+                this.execCommand(conn, command, lineReader);
             }
             if (!autoCommit) {
                 conn.commit();
@@ -172,57 +212,60 @@ public class ScriptRunner {
         }
     }
 
-	private void execCommand(Connection conn, StringBuffer command,
-			LineNumberReader lineReader) throws SQLException {
-		Statement statement = conn.createStatement();
+    private void execCommand(Connection conn, StringBuffer command,
+                             LineNumberReader lineReader) throws SQLException {
+        Statement statement = conn.createStatement();
 
-		println(command);
+        println(command);
 
-		boolean hasResults = false;
-		try {
-		    hasResults = statement.execute(command.toString());
-		} catch (SQLException e) {
-		    final String errText = String.format("Error executing '%s' (line %d): %s", command, lineReader.getLineNumber(), e.getMessage());
-		    if (stopOnError) {
-		        throw new SQLException(errText, e);
-		    } else {
-		        println(errText);
-		    }
-		}
+        boolean hasResults = false;
+        try {
+            hasResults = statement.execute(command.toString());
+        } catch (SQLException e) {
+            final String errText = String.format("Error executing '%s' (line %d): %s", command, lineReader.getLineNumber(), e.getMessage());
+            if (stopOnError) {
+                throw new SQLException(errText, e);
+            } else {
+                println(errText);
+            }
+        }
 
-		if (autoCommit && !conn.getAutoCommit()) {
-		    conn.commit();
-		}
+        if (autoCommit && !conn.getAutoCommit()) {
+            conn.commit();
+        }
 
-		ResultSet rs = statement.getResultSet();
-		if (hasResults && rs != null) {
-		    ResultSetMetaData md = rs.getMetaData();
-		    int cols = md.getColumnCount();
-		    for (int i = 1; i <= cols; i++) {
-		        String name = md.getColumnLabel(i);
-		        print(name + "\t");
-		    }
-		    println("");
-		    while (rs.next()) {
-		        for (int i = 1; i <= cols; i++) {
-		            String value = rs.getString(i);
-		            print(value + "\t");
-		        }
-		        println("");
-		    }
-		}
+        ResultSet rs = statement.getResultSet();
+        if (hasResults && rs != null) {
+            //query is a select query
+            ResultSetMetaData md = rs.getMetaData();
+            int cols = md.getColumnCount();
+            for (int i = 1; i <= cols; i++) {
+                String name = md.getColumnLabel(i);
+                print(name + "\t");
+            }
+            println("");
+            while (rs.next()) {
+                for (int i = 1; i <= cols; i++) {
+                    String value = rs.getString(i);
+                    print(value + "\t");
+                }
+                println("");
+            }
+        } else if (!hasResults) {
+            //query can be update or any query apart from select query
+            int count = statement.getUpdateCount();
+        }
 
-		try {
-		    statement.close();
-		} catch (Exception e) {
-		    // Ignore to workaround a bug in Jakarta DBCP
-		}
-	}
+        try {
+            statement.close();
+        } catch (Exception e) {
+            // Ignore to workaround a bug in Jakarta DBCP
+        }
+    }
 
     private String getDelimiter() {
         return delimiter;
     }
-
     @SuppressWarnings("UseOfSystemOutOrSystemErr")
     private void print(Object o) {
         if (logWriter != null) {
