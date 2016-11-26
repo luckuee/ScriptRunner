@@ -1,0 +1,172 @@
+//use ojdbc7.jar and jtds 1.2.5.jar
+import java.io.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.util.Properties;
+import java.util.Scanner;
+
+public class DBUtil {
+    public static DBInfo mDbInfo = null;
+    public static String productScriptFile=null;
+    public static String adminScriptFile = null;
+    public static String fullLineDelimiter = null;
+    private static final String SERVICES_PROPERTIES = "services.properties";
+    private static final String SERVICES_PROPERTIES_QA = "\\..\\conf\\services.properties";
+
+    public static String getCurrentProductionDirectory() {
+        final File f = new File(ScriptRunner.class.getProtectionDomain().getCodeSource().getLocation().getPath());
+        String parentDir = f.getParent();
+        parentDir = parentDir.replaceAll("%20" ," ");
+        System.out.println("production path is: " + parentDir);
+        boolean fileExists = new File(parentDir, SERVICES_PROPERTIES).exists();
+        if(fileExists)
+        return parentDir;
+        else
+            return parentDir+File.separator+"..";
+
+    }
+
+
+    private static DBInfo getDBInfoFromServiesProps(DBInfo dbInfo)/* throws ConfigurationException*/ {
+
+
+
+        String icp_home = System.getProperty("jboss.home.dir") + "";
+        String servicePropertiesPath = icp_home + SERVICES_PROPERTIES_QA;
+        File f = new File(servicePropertiesPath);
+        if (!(f.exists() && !f.isDirectory())) {
+            servicePropertiesPath = getCurrentProductionDirectory() + File.separator + SERVICES_PROPERTIES;//todo must
+        }
+
+        try {
+            Properties props = new Properties();
+            System.out.println("reading db information from services.properties file present at " + servicePropertiesPath);
+            FileInputStream fis = new FileInputStream(servicePropertiesPath);
+            props.load(fis);
+            //
+            System.out.println("Database information has been read  from services.properties ");
+            String databaseType, userName, host, port, sid, password, url = null;
+            ;
+            databaseType = props.getProperty("db.definition.@product.protocol").contains("sql") ? "SqlServer" : "Oracle";
+            userName = props.getProperty("db.definition.@product.schema");
+            host = props.getProperty("db.definition.@product.host");
+            port = props.getProperty("db.definition.@product.port");
+            sid = props.getProperty("db.definition.@product.sid");
+            password = SecretManager.decodeStringConcise(props.getProperty("db.user.schema.@product"));
+            //password="Midgard1";//todo must remove
+            if (databaseType.equalsIgnoreCase("SqlServer")) {
+                url = "jdbc:sqlserver://" + host + ":" + port + ";" + "databaseName=" + sid;
+            } else if (databaseType.equalsIgnoreCase("Oracle")) {
+                url = "jdbc:" + databaseType + ":thin:@" + host + ":" + port + ":" + sid;
+            }
+
+            dbInfo.setDbType(databaseType);
+            dbInfo.setUserName(userName);
+            dbInfo.setUrl(url);
+            dbInfo.setSID(sid);
+            dbInfo.setHost(host);
+            dbInfo.setPort(port);
+            dbInfo.setPassword(password);
+
+
+            System.out.println("Database information has been loaded in cache ");
+
+            System.out.println("user name is : " + userName);
+            System.out.println("password is : " + password);
+            System.out.println("host is: " + host);
+            System.out.println("port is: " + port);
+            System.out.println("database type is: " + databaseType);
+
+        } catch (FileNotFoundException fe) {
+            System.out.println("services.properties is not found in the expected location");
+        } catch (IOException ie) {
+            System.out.println("Error in database configuration" + ie);
+        }
+        return dbInfo;
+
+    }
+
+    public static Connection getStandAloneConnection() throws SQLException {
+        if (mDbInfo == null) {//mDbInfo=null;
+            mDbInfo = new DBInfo();
+            mDbInfo = getDBInfoFromServiesProps(mDbInfo);
+        }
+        if (/*DatabaseUtil.isType(DatabaseType.ORACLE)*/mDbInfo.getDbType().equalsIgnoreCase("Oracle")) {
+            try {
+                Class.forName("oracle.jdbc.driver.OracleDriver");
+                Connection con = DriverManager.getConnection("jdbc:oracle:thin:@" + mDbInfo.getHost() + ":" + mDbInfo.getPort() + ":" + mDbInfo.getSID()
+                        , mDbInfo.getUserName(), mDbInfo.getPassword());
+                return con;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+        } else {
+
+            try {
+                Class.forName("net.sourceforge.jtds.jdbc.Driver");
+                Connection con = DriverManager.getConnection("jdbc:jtds:sqlserver://" + mDbInfo.getHost() + ":" + mDbInfo.getPort() + "/" + mDbInfo.getSID(), mDbInfo.getUserName(), mDbInfo.getPassword());
+                return con;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+
+        }
+        return null;
+
+    }
+
+    public static Connection getStandAloneAdminConnection() throws SQLException {
+        if (mDbInfo == null) {//mDbInfo=null;
+            mDbInfo = new DBInfo();
+            mDbInfo = getDBInfoFromServiesProps(mDbInfo);
+        }
+DBInfo adminDbInfo = new DBInfo( mDbInfo);
+
+        Scanner scanner = new Scanner(System.in);
+        System.out.print("Give admin user name.");
+        String name = scanner.next();
+        if(adminDbInfo.getDbType().equalsIgnoreCase("Oracle")){
+            if(name==null ||name.length()==0) name = "sys";
+        }else{
+            if(name==null ||name.length()==0) name = "sa";
+        }
+        adminDbInfo.setUserName(name);
+        System.out.println("Admin user name is: " + name);
+        Console console = System.console();
+        if (console == null) {
+            System.out.println("Couldn't get Console instance");
+            System.exit(0);
+        }
+
+        console.printf("Testing password%n");
+        char passwordArray[] = console.readPassword("Enter your secret password: ");
+        console.printf("Password entered was: %s%n", new String(passwordArray));
+        adminDbInfo.setPassword(new String(passwordArray));
+
+
+
+        if (/*DatabaseUtil.isType(DatabaseType.ORACLE)*/adminDbInfo.getDbType().equalsIgnoreCase("Oracle")) {
+            try {
+                Class.forName("oracle.jdbc.driver.OracleDriver");
+                Connection con = DriverManager.getConnection("jdbc:oracle:thin:@" + adminDbInfo.getHost() + ":" + adminDbInfo.getPort() + ":" + adminDbInfo.getSID()
+                        , adminDbInfo.getUserName(), adminDbInfo.getPassword());
+                return con;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+        } else {
+
+            try {
+                Class.forName("net.sourceforge.jtds.jdbc.Driver");
+                Connection con = DriverManager.getConnection("jdbc:jtds:sqlserver://" + adminDbInfo.getHost() + ":" + adminDbInfo.getPort() + "/" + adminDbInfo.getSID(), adminDbInfo.getUserName(), adminDbInfo.getPassword());
+                return con;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+
+        }
+        return null;
+
+    }
+}
