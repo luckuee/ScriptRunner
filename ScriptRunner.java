@@ -2,10 +2,9 @@
 //https://www.mkyong.com/jdbc/how-to-run-a-mysql-script-using-java/
 //http://www.codeproject.com/Articles/802383/Run-SQL-Script-sql-containing-DDL-DML-SELECT-state
 /**
- * Created by rbhushan on 11/4/2016.
+ 
  */
 
-import com.ingenix.freya.DBUtil;
 
 import java.io.*;
 import java.sql.Connection;
@@ -66,6 +65,7 @@ public class ScriptRunner {
         connection.close();
 
         connection = DBUtil.getStandAloneAdminConnection();
+        //TODO if connection fails, then u should ask the admin credential again
         System.out.println("Database connected with admin user credential.");
         runner = new ScriptRunner(connection, false, true);
         absoluteFilePath = DBUtil.getCurrentProductionDirectory() + File.separator + DBUtil.adminScriptFile;
